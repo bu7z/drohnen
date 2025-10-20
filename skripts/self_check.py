@@ -11,7 +11,8 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.crazyflie.log import LogConfig
 
 # ==================== Konfiguration ====================
-DEF_URI = "radio://0/80/2M/E7E7E7E7E5"
+# DEF_URI = "radio://0/80/2M/E7E7E7E7E5"
+DEF_URI = "radio://0/80/2M/1337691337"
 
 # Kalman-Reset Kriterien
 KALMAN_MAX_TRIES = 5

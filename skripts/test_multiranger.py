@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import time
 from cflib.crtp import init_drivers
@@ -16,7 +17,8 @@ for v in ('range.front','range.back','range.left','range.right','range.up','rang
     lg.add_variable(v, 'uint16_t')
 
 with SyncCrazyflie(URI, cf=Crazyflie()) as scf:
-    print("Verbunden. Starte Multiranger-Test ...")
+    print("Verbunden. Starte Multiranger-Test in 10s ...")
+    #time.sleep(10)
     with SyncLogger(scf, lg) as logger:
         try:
             for _, data, _ in logger:

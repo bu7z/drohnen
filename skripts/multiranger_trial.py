@@ -4,6 +4,7 @@ import time
 import logging
 
 from cflib import crtp
+from cflib.crtp import init_drivers
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.positioning.motion_commander import MotionCommander
@@ -12,14 +13,17 @@ from cflib.utils.multiranger import Multiranger
 URI = 'radio://0/80/2M/1337691337'   # <-- deine URI
 
 # Tuning
-H_TARGET     = 0.4    # m Zielhöhe
+H_TARGET     = 0.5    # m Zielhöhe
 V_MAX_XY     = 0.30    # m/s max seitl./vor/zurück
 V_MAX_Z      = 0.20    # m/s max steigen/sinken
-THR_XY       = 0.80    # m Hand wirkt bis zu dieser Distanz
-THR_UP       = 2.0    # m Deckennähe
+THR_XY       = 0.50    # m Hand wirkt bis zu dieser Distanz
+THR_UP       = 2    # m Deckennähe
 DEADBAND     = 0.03    # m/s kleine Geschwindigkeiten -> 0
 ALPHA        = 0.35    # EMA-Glättung
 PERIOD       = 0.07    # s ~14 Hz
+
+init_drivers()
+
 
 def ema(prev, new):
     if prev is None: return new
@@ -61,6 +65,7 @@ def main():
             fE=bE=lE=rE=uE=dE = None  # EMAs
             try:
                 while True:
+                
                     # EMA der Distanzen
                     fE = ema(fE, mr.front)
                     bE = ema(bE, mr.back)
