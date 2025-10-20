@@ -10,7 +10,8 @@ from cflib.crazyflie.log import LogConfig
 URI = 'radio://0/80/2M/1337691337'  # anpassen
 
 init_drivers()
-
+print("sleep 5s")
+time.sleep(5)
 # LogConfig anlegen (range.* sind uint16_t in Millimetern)
 lg = LogConfig(name='ranges', period_in_ms=100)
 for v in ('range.front','range.back','range.left','range.right','range.up','range.zrange'):
