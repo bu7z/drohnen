@@ -80,7 +80,7 @@ def main():
                         err = H_TARGET - dE           # >0: zu niedrig
                         vz = clamp(1.0 * err, -V_MAX_Z, V_MAX_Z)
                     if uE is not None and uE < THR_UP:
-                        vz = min(vz, -0.05)          # Decke nah -> nicht steigen
+                        vz = min(vz, -0.5)          # Decke nah -> nicht steigen
 
                     # --- Repulsives XY ---
                     vx = 0.0

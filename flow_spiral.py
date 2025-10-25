@@ -88,19 +88,19 @@ def main():
     crtp.init_drivers(enable_debug_driver=False)
     print("Verbinde zum Crazyflie...")
     with SyncCrazyflie(URI, cf=Crazyflie(rw_cache='./cfcache')) as scf:
-        print("✅ Verbindung hergestellt.")
+        print("Verbindung hergestellt.")
         set_kalman(scf)
 
         with MotionCommander(scf, default_height=START_Z) as mc:
             print(f"🛫 Hover auf {START_Z:.2f} m …")
             time.sleep(1.0)  # kurze Stabilisierung
 
-            print(f"🔁 Spiralaufstieg bis {END_Z:.2f} m, Radius ≤ {R_MAX:.2f} m …")
+            print(f"Spiralaufstieg bis {END_Z:.2f} m, Radius ≤ {R_MAX:.2f} m …")
             fly_spiral(mc, r_max=R_MAX, z0=START_Z, z1=END_Z, turns=TURNS, seg_len=SEG_LEN)
 
-            print("🛬 Landung …")
+            print("Landung …")
             mc.land(velocity=0.3)
-            print("✅ Fertig.")
+            print("Fertig.")
 
 if __name__ == '__main__':
     main()
