@@ -11,10 +11,10 @@ URI = 'radio://0/80/2M/1337691337'
 # --- Parameter ---
 START_Z   = 0.30   # m: Start-Hover
 END_Z     = 1.50   # m: Zielhöhe
-R_MAX     = 1   # m: maximaler Spiralradius
+R_MAX     = 0.5   # m: maximaler Spiralradius
 TURNS     = 5.0    # Anzahl Umdrehungen bis zum Endradius
 SEG_LEN   = 0.05   # m: Segmentlänge (feinere Bahn bei kleinerem Wert)
-VEL_XY    = 2.0   # m/s: Seitwärts-/Vorwärtsgeschwindigkeit
+VEL_XY    = 2.0   # m/s: Seitwärts-/Vorwärtsgeschwindigkeit; eigentlich quatsche weil min(XY, Z)
 VEL_Z     = 1.5   # m/s: Vertikal
 PAUSE     = 0.00   # s: optional kleine Pause zwischen Segmenten
 
