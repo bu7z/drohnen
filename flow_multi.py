@@ -7,7 +7,7 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.positioning.motion_commander import MotionCommander
 from cflib.utils.multiranger import Multiranger
 
-URI = 'radio://0/80/2M/1337691337'
+URI = 'radio://0/80/2M/0xE7E7E7E7E7'
 
 # --- Parameter ---
 DIST_THRESHOLD = 0.50      # m: Abstand, ab dem ausgewichen wird
