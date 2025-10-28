@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 Crazyflie 2.1+ | Flow2 + Multiranger
-Tastatur + SOFORTIGE Hindernisvermeidung
-LINKS/RECHTS RICHTIG | STARK ausweichen | Flüssig
+Tastatur + Hindernisvermeidung
+NOTLANDUNG NUR BEI:
+  → Multiranger: ALLE 32.77m
+  → Flow Deck: zrange = 65.53m
 """
 
 import logging
@@ -20,35 +22,37 @@ from cflib.utils.multiranger import Multiranger
 
 # === KONFIG ===
 URI = 'radio://0/90/2M/E7E7E7E7E7'
-OBSTACLE_DISTANCE = 1.0   # m
-MANUAL_VELOCITY = 0.5     # m/s
-AVOID_VELOCITY = 0.8      # m/s ← STARK!
+OBSTACLE_DISTANCE = 0.6      # m
+MANUAL_VELOCITY = 0.4        # m/s
+AVOID_VELOCITY = 0.6         # m/s
 KEEP_FLYING = True
+
+# Kritische Werte
+MR_INVALID = 32.77
+ZRANGE_INVALID = 65.53
+TOLERANCE = 0.1  # für Float-Vergleich
 
 logging.basicConfig(level=logging.ERROR)
 
 
-# === Hindernis-Check ===
+# === Hilfsfunktionen ===
 def is_close(val):
     return val is not None and val < OBSTACLE_DISTANCE
 
 
-# === Formatierung ===
 def fmt(val):
     return f"{val:5.2f}" if val is not None and val < 10.0 else " --- "
 
 
-# === Tastatur ===
 def get_key():
     if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
         return sys.stdin.read(1).lower()
     return None
 
 
-# === Emergency Stop ===
 def emergency_stop(signum, frame):
     global KEEP_FLYING
-    print("\nEMERGENCY STOP!")
+    print("\n\nEMERGENCY STOP! (Strg+C)")
     KEEP_FLYING = False
     try:
         scf.cf.commander.send_stop_setpoint()
@@ -68,15 +72,21 @@ if __name__ == '__main__':
     print("Verbinde mit Crazyflie...")
     with SyncCrazyflie(URI, cf=cf) as scf:
         print("Verbunden!")
-
         print("Arme Drohne...")
         scf.cf.platform.send_arming_request(True)
         time.sleep(1.0)
 
-        with MotionCommander(scf, default_height=0.4) as mc:
+        with MotionCommander(scf, default_height=1.0) as mc:
             with Multiranger(scf) as multiranger:
-                print("Abgehoben! Steuerung: W/S/A/D | R/F hoch/runter | X=Stop | Q=Landung")
-                print(f"Hindernisvermeidung: < {OBSTACLE_DISTANCE}m → SOFORT ausweichen!")
+                print("\n" + "="*60)
+                print("ABGEHOBEN! Steuerung:")
+                print("   W/S = vor/zurück | A/D = links/rechts | R/F = hoch/runter")
+                print("   X = Stop | Q = Landung | Strg+C = Notstopp")
+                print("NOTLANDUNG NUR BEI:")
+                print("  → Multiranger: F/B/L/R/U = 32.77m")
+                print("  → Flow Deck: zrange = 65.53m")
+                print("  → Sonst: weiterfliegen!")
+                print("="*60 + "\n")
 
                 old_settings = termios.tcgetattr(sys.stdin)
                 tty.setcbreak(sys.stdin.fileno())
@@ -99,9 +109,9 @@ if __name__ == '__main__':
                         elif key == 'f': vz = -MANUAL_VELOCITY; user_input = True
                         elif key == 'x':
                             vx = vy = vz = 0
-                            print("STOP")
+                            print("STOP (X gedrückt)")
                         elif key == 'q':
-                            print("Landung...")
+                            print("Landung angefordert (Q)...")
                             break
 
                         if user_input:
@@ -109,25 +119,61 @@ if __name__ == '__main__':
                         elif current_time - last_input_time > 0.3:
                             vx = vy = vz = 0
 
-                        # === HINDERNISVERMEIDUNG HAT PRIORITÄT! ===
+                        # === KRITISCHE NOTLANDUNG: NUR bei 32.77m + 65.53m ===
+                        mr_values = [
+                            multiranger.front,
+                            multiranger.back,
+                            multiranger.left,
+                            multiranger.right,
+                            multiranger.up
+                        ]
+                        zrange_val = multiranger.zrange if hasattr(multiranger, 'zrange') else None
+
+                        # Prüfe: ALLE Multiranger = 32.77m?
+                        all_mr_invalid = all(
+                            v is not None and abs(v - MR_INVALID) < TOLERANCE
+                            for v in mr_values
+                        )
+
+                        # Prüfe: zrange = 65.53m?
+                        zrange_invalid = (
+                            zrange_val is not None and
+                            abs(zrange_val - ZRANGE_INVALID) < TOLERANCE
+                        )
+
+                        if all_mr_invalid and zrange_invalid:
+                            print("\n" + "!"*60)
+                            print("!!! KRITISCHER SENSOR-AUSFALL ERKANNT !!!")
+                            print("Multiranger: F/B/L/R/U = 32.77m")
+                            print(f"Flow Deck: zrange = {zrange_val:.2f}m")
+                            print("→ SOFORTIGE NOTLANDUNG!")
+                            print("!"*60 + "\n")
+                            break
+
+                        # === Hindernisvermeidung (32.77m = KEIN HINDERNIS!) ===
                         if is_close(multiranger.front):
                             vx = -AVOID_VELOCITY
-                            print(f"FRONT BLOCK: {multiranger.front:.2f}m → Voll zurück!")
+                            print(f"FRONT BLOCK: {fmt(multiranger.front)} → Rückwärts!")
                         if is_close(multiranger.back):
                             vx = AVOID_VELOCITY
-                            print(f"BACK BLOCK: {multiranger.back:.2f}m → Voll vor!")
+                            print(f"BACK BLOCK: {fmt(multiranger.back)} → Vorwärts!")
                         if is_close(multiranger.left):
-                            vy = -AVOID_VELOCITY  # ← von links weg → nach links!
-                            print(f"LEFT BLOCK: {multiranger.left:.2f}m → Voll links!")
+                            vy = -AVOID_VELOCITY
+                            print(f"LEFT BLOCK: {fmt(multiranger.left)} → Links!")
                         if is_close(multiranger.right):
-                            vy = AVOID_VELOCITY   # ← von rechts weg → nach rechts!
-                            print(f"RIGHT BLOCK: {multiranger.right:.2f}m → Voll rechts!")
+                            vy = AVOID_VELOCITY
+                            print(f"RIGHT BLOCK: {fmt(multiranger.right)} → Rechts!")
                         if is_close(multiranger.up):
                             print("OBEN ZU NAH → Notlandung!")
                             break
 
                         # === Status ===
-                        status = f"F:{fmt(multiranger.front)} B:{fmt(multiranger.back)} L:{fmt(multiranger.left)} R:{fmt(multiranger.right)} U:{fmt(multiranger.up)}"
+                        status = (f"F:{fmt(multiranger.front)} "
+                                  f"B:{fmt(multiranger.back)} "
+                                  f"L:{fmt(multiranger.left)} "
+                                  f"R:{fmt(multiranger.right)} "
+                                  f"U:{fmt(multiranger.up)} "
+                                  f"| z:{fmt(zrange_val)}")
                         print(status + "  " * 15, end='\r')
 
                         # === Bewegung ===
@@ -138,11 +184,15 @@ if __name__ == '__main__':
                     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
         # === Landung ===
-        print("\nLandung...")
+        print("\n\nLandung wird eingeleitet...")
         try:
             mc.land(velocity=0.2)
             time.sleep(3.0)
-        except:
-            pass
+        except Exception as e:
+            print(f"Landung fehlgeschlagen: {e}")
+            try:
+                scf.cf.commander.send_stop_setpoint()
+            except:
+                pass
 
-    print("Programm beendet.")
+    print("Programm sicher beendet.")
