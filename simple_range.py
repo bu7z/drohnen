@@ -1,164 +1,148 @@
 #!/usr/bin/env python3
+"""
+Crazyflie 2.1+ | Flow2 + Multiranger
+Tastatur + SOFORTIGE Hindernisvermeidung
+LINKS/RECHTS RICHTIG | STARK ausweichen | Flüssig
+"""
+
+import logging
 import time
-from collections import deque
-from cflib import crtp
+import signal
+import sys
+import select
+import tty
+import termios
+import cflib.crtp
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.positioning.motion_commander import MotionCommander
-from cflib.crazyflie.log import LogConfig
+from cflib.utils.multiranger import Multiranger
 
-URI = 'radio://0/80/2M/1337691337'
+# === KONFIG ===
+URI = 'radio://0/90/2M/E7E7E7E7E7'
+OBSTACLE_DISTANCE = 1.0   # m
+MANUAL_VELOCITY = 0.5     # m/s
+AVOID_VELOCITY = 0.8      # m/s ← STARK!
+KEEP_FLYING = True
 
-BAD_OOR_MAX = 5          # wie oft OOR/0 in Folge erlaubt
-NOUPDATE_TIMEOUT = 1.0   # s ohne Update -> bad
-STUCK_WINDOW = 1.5       # s innerhalb derer "stuck" erkannt wird
-STUCK_EPS = 0.005        # m Änderung kleiner als EPS -> stuck
+logging.basicConfig(level=logging.ERROR)
 
-def safe_land(scf, mc, have_z=False, get_z=lambda: None, vdown=0.35, timeout=6.0):
-    """Nicht-blockierendes, robustes Landen mit optionaler Bodenerkennung über zrange."""
-    print("⚠️  Watchdog: Starte Sicherheitslandung ...")
-    t0 = time.time()
+
+# === Hindernis-Check ===
+def is_close(val):
+    return val is not None and val < OBSTACLE_DISTANCE
+
+
+# === Formatierung ===
+def fmt(val):
+    return f"{val:5.2f}" if val is not None and val < 10.0 else " --- "
+
+
+# === Tastatur ===
+def get_key():
+    if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+        return sys.stdin.read(1).lower()
+    return None
+
+
+# === Emergency Stop ===
+def emergency_stop(signum, frame):
+    global KEEP_FLYING
+    print("\nEMERGENCY STOP!")
+    KEEP_FLYING = False
     try:
-        while time.time() - t0 < timeout:
-            # sanft nach unten fahren
-            mc.start_linear_motion(0.0, 0.0, -vdown)
-            time.sleep(0.1)
-            if have_z:
-                z = get_z()
-                if z is not None and z < 0.06:   # ~6 cm => Boden
-                    break
-        # Stop-Setpoint senden
-        mc.stop()
-        # sicherheitshalber Motoren stoppen
         scf.cf.commander.send_stop_setpoint()
-        time.sleep(0.2)
-    except Exception as e:
-        print(f"Landungsroutine: {e}")
-    finally:
-        # Kontext verlässt später trotzdem ordentlich
+    except:
         pass
 
-def hover_with_watchdog():
-    crtp.init_drivers(enable_debug_driver=False)
-    print("Verbinde zum Crazyflie...")
 
-    with SyncCrazyflie(URI, cf=Crazyflie(rw_cache='./cfcache')) as scf:
-        print("✅ Verbindung hergestellt.")
-        cf = scf.cf
-        cf.log.use_toc_cache = False
-        cf.param.use_toc_cache = False
+signal.signal(signal.SIGINT, emergency_stop)
+signal.signal(signal.SIGTERM, emergency_stop)
 
-        # --- prüfen, ob zrange verfügbar ist
-        toc = cf.log.toc.toc
-        available = {f"{grp}.{name}" for grp, names in toc.items() for name in names}
-        have_zrange = "range.zrange" in available
 
-        # LogConfig
-        lg = LogConfig(name="ranges", period_in_ms=100)
-        if have_zrange:
-            lg.add_variable("range.zrange", "uint16_t")
-            print("Sensor: using range.zrange")
-        else:
-            print("Sensor: kein range.zrange verfügbar -> Watchdog nutzt nur Zeit/Heuristik")
+# === Hauptprogramm ===
+if __name__ == '__main__':
+    cflib.crtp.init_drivers()
+    cf = Crazyflie(rw_cache='./cache')
 
-        # shared state
-        last_mm = [None]
-        last_ts = [time.time()]
-        bad_count = [0]
-        samples = deque(maxlen=20)  # ~2 s bei 100 ms
+    print("Verbinde mit Crazyflie...")
+    with SyncCrazyflie(URI, cf=cf) as scf:
+        print("Verbunden!")
 
-        def mm_to_m(mm):
-            if mm is None or mm == 0 or mm >= 65000:
-                return None
-            return mm / 1000.0
+        print("Arme Drohne...")
+        scf.cf.platform.send_arming_request(True)
+        time.sleep(1.0)
 
-        def cb(ts, data, logconf):
-            if have_zrange:
-                mm = data.get("range.zrange")
-                last_mm[0] = mm
-                last_ts[0] = time.time()
+        with MotionCommander(scf, default_height=0.4) as mc:
+            with Multiranger(scf) as multiranger:
+                print("Abgehoben! Steuerung: W/S/A/D | R/F hoch/runter | X=Stop | Q=Landung")
+                print(f"Hindernisvermeidung: < {OBSTACLE_DISTANCE}m → SOFORT ausweichen!")
 
-        if have_zrange:
-            cf.log.add_config(lg)
-            lg.data_received_cb.add_callback(cb)
-            lg.start()
-            time.sleep(0.2)
+                old_settings = termios.tcgetattr(sys.stdin)
+                tty.setcbreak(sys.stdin.fileno())
+                last_input_time = time.time()
 
-        def read_z():
-            return mm_to_m(last_mm[0])
-
-        # --- Flug
-        emergency = [False]
-        try:
-            with MotionCommander(scf, default_height=1.0) as mc:
-                print("🛫 Hover auf 1.0 m ... (10 s)")
-
-                t_start = time.time()
-                while time.time() - t_start < 10.0:
-                    time.sleep(0.1)
-
-                    # --- Watchdog Checks
-                    now = time.time()
-                    z = read_z() if have_zrange else None
-
-                    # 1) kein Update
-                    if have_zrange and (now - last_ts[0]) > NOUPDATE_TIMEOUT:
-                        print("Watchdog: kein Sensor-Update")
-                        emergency[0] = True
-
-                    # 2) OOR/0-Wert
-                    if have_zrange and z is None:
-                        bad_count[0] += 1
-                        if bad_count[0] >= BAD_OOR_MAX:
-                            print("Watchdog: zu viele OOR/0 Messungen")
-                            emergency[0] = True
-                    else:
-                        bad_count[0] = 0
-
-                    # 3) Stuck-Value (nahezu konstant)
-                    if have_zrange and z is not None:
-                        samples.append((now, z))
-                        # Fenster
-                        while samples and (now - samples[0][0]) > STUCK_WINDOW:
-                            samples.popleft()
-                        if len(samples) >= 5:
-                            zmin = min(s for _, s in samples)
-                            zmax = max(s for _, s in samples)
-                            if (zmax - zmin) < STUCK_EPS:
-                                print("Watchdog: Sensor scheint 'stuck'")
-                                emergency[0] = True
-
-                    # optional: Ausgabe alle 1 s
-                    if int((now - t_start)*10) % 10 == 0:
-                        out = f"{z:.2f} m" if z is not None else "n/a"
-                        print(f"Aktueller Bodenabstand: {out}")
-
-                    if emergency[0]:
-                        safe_land(scf, mc, have_z=have_zrange, get_z=read_z)
-                        break
-
-                if not emergency[0]:
-                    print("Leite Landung ein ...")
-                    # eigene, nicht-blockierende Landung (vermeidet lange sleep()s in der Lib)
-                    safe_land(scf, mc, have_z=have_zrange, get_z=read_z)
-
-        except KeyboardInterrupt:
-            print("⌨️  Abbruch durch Benutzer – sichere Landung ...")
-            try:
-                # sichere Landung, auch wenn Logger/Threads laufen
-                with MotionCommander(scf, default_height=0.3) as mc:
-                    safe_land(scf, mc, have_z=have_zrange, get_z=read_z)
-            except Exception:
-                # letzter Ausweg
-                cf.commander.send_stop_setpoint()
-                time.sleep(0.2)
-        finally:
-            if have_zrange:
                 try:
-                    lg.stop()
-                except Exception:
-                    pass
-            print("🔚 Ende.")
+                    while KEEP_FLYING:
+                        key = get_key()
+                        current_time = time.time()
 
-if __name__ == "__main__":
-    hover_with_watchdog()
+                        # === Manuelle Eingabe ===
+                        vx = vy = vz = 0.0
+                        user_input = False
+
+                        if key == 'w': vx = MANUAL_VELOCITY; user_input = True
+                        elif key == 's': vx = -MANUAL_VELOCITY; user_input = True
+                        elif key == 'a': vy = -MANUAL_VELOCITY; user_input = True
+                        elif key == 'd': vy = MANUAL_VELOCITY; user_input = True
+                        elif key == 'r': vz = MANUAL_VELOCITY; user_input = True
+                        elif key == 'f': vz = -MANUAL_VELOCITY; user_input = True
+                        elif key == 'x':
+                            vx = vy = vz = 0
+                            print("STOP")
+                        elif key == 'q':
+                            print("Landung...")
+                            break
+
+                        if user_input:
+                            last_input_time = current_time
+                        elif current_time - last_input_time > 0.3:
+                            vx = vy = vz = 0
+
+                        # === HINDERNISVERMEIDUNG HAT PRIORITÄT! ===
+                        if is_close(multiranger.front):
+                            vx = -AVOID_VELOCITY
+                            print(f"FRONT BLOCK: {multiranger.front:.2f}m → Voll zurück!")
+                        if is_close(multiranger.back):
+                            vx = AVOID_VELOCITY
+                            print(f"BACK BLOCK: {multiranger.back:.2f}m → Voll vor!")
+                        if is_close(multiranger.left):
+                            vy = -AVOID_VELOCITY  # ← von links weg → nach links!
+                            print(f"LEFT BLOCK: {multiranger.left:.2f}m → Voll links!")
+                        if is_close(multiranger.right):
+                            vy = AVOID_VELOCITY   # ← von rechts weg → nach rechts!
+                            print(f"RIGHT BLOCK: {multiranger.right:.2f}m → Voll rechts!")
+                        if is_close(multiranger.up):
+                            print("OBEN ZU NAH → Notlandung!")
+                            break
+
+                        # === Status ===
+                        status = f"F:{fmt(multiranger.front)} B:{fmt(multiranger.back)} L:{fmt(multiranger.left)} R:{fmt(multiranger.right)} U:{fmt(multiranger.up)}"
+                        print(status + "  " * 15, end='\r')
+
+                        # === Bewegung ===
+                        mc.start_linear_motion(vx, vy, vz)
+                        time.sleep(0.05)
+
+                finally:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+        # === Landung ===
+        print("\nLandung...")
+        try:
+            mc.land(velocity=0.2)
+            time.sleep(3.0)
+        except:
+            pass
+
+    print("Programm beendet.")
