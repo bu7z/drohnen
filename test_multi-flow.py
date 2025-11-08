@@ -6,7 +6,7 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 
-URI = 'radio://0/90/2M/E7E7E7E7E7'   # <- anpassen!
+URI = 'radio://0/80/2M/E7E7E7E7E7'   # <- anpassen!
 READ_MS = 200
 
 def fmt_range_mm(x):

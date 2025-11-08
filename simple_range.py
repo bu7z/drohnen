@@ -21,7 +21,7 @@ from cflib.positioning.motion_commander import MotionCommander
 from cflib.utils.multiranger import Multiranger
 
 # === KONFIG ===
-URI = 'radio://0/90/2M/E7E7E7E7E7'
+URI = 'radio://0/80/2M/E7E7E7E7E7'
 OBSTACLE_DISTANCE = 0.6      # m
 MANUAL_VELOCITY = 0.4        # m/s
 AVOID_VELOCITY = 0.6         # m/s
